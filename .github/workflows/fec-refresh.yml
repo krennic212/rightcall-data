@@ -1,0 +1,74 @@
+# Weekly official FEC refresh.
+# Runs here so Actions can push with this repo's own token.
+# The app repo token was denied write access (403) on the last attempt.
+name: Weekly FEC refresh
+
+on:
+  schedule:
+    - cron: "15 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout data repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download official FEC bulk files
+        run: |
+          mkdir -p /tmp/fec src/data/states
+          curl -fL --retry 3 -o /tmp/fec/cm24.zip https://www.fec.gov/files/bulk-downloads/2024/cm24.zip
+          curl -fL --retry 3 -o /tmp/fec/cm26.zip https://www.fec.gov/files/bulk-downloads/2026/cm26.zip
+          curl -fL --retry 3 -o /tmp/fec/indiv24.zip https://www.fec.gov/files/bulk-downloads/2024/indiv24.zip
+          curl -fL --retry 3 -o /tmp/fec/indiv26.zip https://www.fec.gov/files/bulk-downloads/2026/indiv26.zip
+
+      - name: Rebuild from the 2024 individual file
+        env:
+          FRESH: "1"
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: unzip -p /tmp/fec/indiv24.zip itcont.txt | node --experimental-strip-types scripts/ingest-cycle.ts
+
+      - name: Merge the 2026 individual file
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: unzip -p /tmp/fec/indiv26.zip itcont.txt | node --experimental-strip-types scripts/ingest-cycle.ts
+
+      - name: Ingest local trades from 2024
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: unzip -p /tmp/fec/indiv24.zip itcont.txt | node --experimental-strip-types scripts/ingest-trades.ts
+
+      - name: Ingest local trades from 2026
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: unzip -p /tmp/fec/indiv26.zip itcont.txt | node --experimental-strip-types scripts/ingest-trades.ts
+
+      - name: Write feed meta
+        run: node scripts/write-feed-meta.mjs /tmp/feed-out
+
+      - name: Publish feed at the site root
+        run: |
+          rm -rf states
+          mkdir -p states
+          cp src/data/states/*.json states/
+          cp src/data/committees.json committees.json
+          cp /tmp/feed-out/harvest-meta.json harvest-meta.json
+          cp /tmp/feed-out/harvest.json harvest.json
+          git config user.email "actions@github.com"
+          git config user.name "rightcall-feed"
+          git add harvest-meta.json harvest.json committees.json states
+          if git diff --cached --quiet; then
+            echo "Feed already current."
+            exit 0
+          fi
+          git commit -m "Refresh FEC feed"
+          git push
