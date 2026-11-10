@@ -1,0 +1,9 @@
+{
+  "version": "2026-11-10",
+  "refreshedAt": "2026-11-10T16:19:23.462Z",
+  "note": "Shard manifest. Donor rows live in states/{ST}.json.",
+  "states": "states/{ST}.json",
+  "committees": "committees.json",
+  "meta": "harvest-meta.json",
+  "people": 700557
+}
